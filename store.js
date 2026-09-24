@@ -3,7 +3,9 @@ import * as drive from './drive.js';
 
 const DATA_KEY = 'bolsacheia:data';
 const META_KEY = 'bolsacheia:meta';
-const COLLECTIONS = ['tx', 'debts', 'boxes', 'cats'];
+// rules: classificação que a pessoa escolheu na importação, por descrição (o app aprende com ela).
+const COLLECTIONS = ['tx', 'debts', 'boxes', 'cats', 'rules'];
+const REQUIRED = ['tx', 'debts', 'boxes', 'cats']; // arquivos antigos não têm "rules"
 
 // IDs fixos: quando os dois aparelhos se juntam, as categorias padrão não duplicam.
 const DEFAULT_CATS = [
@@ -42,6 +44,7 @@ function emptyData() {
       'box-reserva': { id: 'box-reserva', name: 'Reserva de emergência', purpose: 'reserva', where: '', risk: 'baixo', target: 0, rate: 0, yield: 0, updatedAt: 0 },
     },
     cats,
+    rules: {},
   };
 }
 
@@ -81,7 +84,7 @@ function sameData(x, y) {
 }
 
 function isValidData(d) {
-  return d && typeof d === 'object' && d.v === 1 && d.settings && COLLECTIONS.every((c) => typeof d[c] === 'object');
+  return d && typeof d === 'object' && d.v === 1 && d.settings && REQUIRED.every((c) => d[c] && typeof d[c] === 'object');
 }
 
 let data = merge(emptyData(), readJSON(localStorage, DATA_KEY));

@@ -2,7 +2,7 @@
 // Estratégia "rede primeiro": com internet, sempre pega a versão nova (e atualiza a cópia);
 // sem internet ou com rede muito lenta, usa a cópia guardada.
 // Os dados da família não passam por aqui (ficam no localStorage e no Google Drive).
-const CACHE = 'bolsa-cheia-v1';
+const CACHE = 'bolsa-cheia-v2';
 const FILES = [
   './',
   'index.html',
@@ -12,6 +12,7 @@ const FILES = [
   'drive.js',
   'config.js',
   'lessons.js',
+  'importar.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',

@@ -110,7 +110,7 @@ O GitHub Pages hospeda o app de graça, com HTTPS (obrigatório para instalar no
 2. Arraste **estes arquivos e a pasta `icons`**:
 
    ```
-   index.html   styles.css   app.js   store.js   drive.js
+   index.html   styles.css   app.js   store.js   drive.js   importar.js
    config.js    lessons.js   sw.js    manifest.webmanifest
    icons/       (a pasta inteira, com os 5 ícones)
    ```
@@ -155,6 +155,25 @@ Quando algum arquivo mudar, envie de novo só os arquivos alterados (**Add file 
 - Com internet e login ativo, o app junta os dados com o arquivo do Drive poucos segundos depois de cada mudança e sempre que é aberto.
 - O login do Google dura cerca de **1 hora**. Depois disso, o botão no topo muda para **Entrar no Google**: toque nele para sincronizar de novo. Nada se perde nesse meio-tempo.
 - Se os dois mexerem no mesmo lançamento, vale a alteração mais recente. Lançamentos diferentes feitos ao mesmo tempo nunca se sobrescrevem.
+
+### Importar extratos e faturas (sem custo)
+
+Na aba **Importar**, há dois caminhos. Os dois terminam numa tela de revisão, e **nada entra no app antes de você tocar em "Lançar"**.
+
+1. **Extrato em OFX, CSV ou planilha (Excel):** o app lê na hora, no próprio aparelho, e nada sai dele. No internet banking, procure "exportar extrato" e escolha OFX (ou CSV/Excel). Do Asaas, use a planilha do extrato. A categoria é sugerida por palavras-chave (ex.: "ATACADÃO" → Mercado).
+2. **Fatura em PDF ou print:** use o Claude da sua assinatura.
+   - Toque em **Copiar instruções**.
+   - No app do Claude, anexe o PDF ou print, cole as instruções e envie.
+   - Copie a resposta do Claude e cole no campo do Bolsa Cheia. Depois toque em **Ler resposta**.
+
+   Dica: crie um **Projeto** no Claude com essas instruções. Aí basta anexar e enviar. Não tem custo extra, mas usa o limite da assinatura.
+
+Outras regras:
+- **O app aprende:** quando você troca a classificação de um item na revisão, a mesma descrição já vem classificada assim nas próximas importações. Isso vale para os dois aparelhos, porque sincroniza pelo Drive.
+- **Extrato e fatura juntos:** o pagamento da fatura que aparece no extrato fica de fora, para as compras do cartão não contarem duas vezes. Transferências entre contas de vocês (inclusive saques do Asaas para a sua conta) também ficam de fora. Aplicações viram "guardar" na caixinha de reserva.
+- O app avisa quando um item parece já ter sido lançado (mesmo tipo e valor, até 3 dias de diferença) e quando o mesmo arquivo já foi importado antes.
+- PDF com senha (comum em fatura do Banco do Brasil): se o Claude não conseguir abrir, abra no aparelho, use **Imprimir > Salvar como PDF** e envie a cópia sem senha, ou mande um print da fatura.
+- Estornos entram como despesa com valor negativo e abatem o gasto da categoria.
 
 ### Cópia de segurança
 

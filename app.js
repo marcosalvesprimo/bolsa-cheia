@@ -1,6 +1,7 @@
 // Bolsa Cheia: telas e interação.
 import { CURAS, LEIS, DABASIR, DICAS } from './lessons.js';
 import * as drive from './drive.js';
+import * as imp from './importar.js';
 import {
   store, sync, syncNow, createDriveFile, openDriveFile, disconnectDrive,
   PURPOSES, RISKS, uid, todayISO, monthOf, addMonths, txOfMonth, summary, activeDebts,
@@ -17,7 +18,13 @@ const state = {
   search: '',
   onboard: 'choose',
   sim: null,
+  imp: emptyImp(),
 };
+
+// Importação em andamento: documentos lidos e itens sugeridos, antes de lançar. Só em memória.
+function emptyImp() {
+  return { files: [], items: [], running: false, who: null, paste: '', showPrompt: false };
+}
 
 // ---------- Utilidades ----------
 
@@ -130,6 +137,7 @@ const LOGO = `<svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><rect wid
 const NAV = [
   ['inicio', 'Início', 'home'],
   ['extrato', 'Extrato', 'list'],
+  ['importar', 'Importar', 'upload'],
   ['orcamento', 'Orçamento', 'pie'],
   ['dividas', 'Dívidas', 'link'],
   ['patrimonio', 'Patrimônio', 'coins'],
@@ -141,6 +149,7 @@ const NAV2 = [
 const VIEWS = {
   inicio: viewInicio,
   extrato: viewExtrato,
+  importar: viewImportar,
   orcamento: viewOrcamento,
   dividas: viewDividas,
   patrimonio: viewPatrimonio,
@@ -170,7 +179,7 @@ function syncChip() {
 
 function shell(v, content) {
   const cur = (k) => (k === v ? 'aria-current="page"' : '');
-  const showFab = !['licoes', 'ajustes'].includes(v);
+  const showFab = !['licoes', 'ajustes', 'importar'].includes(v);
   return `
   <header class="topbar">
     <a class="brand" href="#inicio">${LOGO}<span>Bolsa Cheia</span></a>
@@ -310,12 +319,13 @@ function txMeta(t, withDate) {
 }
 
 function txRow(t, withDate = false) {
-  const sign = t.type === 'receita' ? '+' : t.type === 'guardar' || t.type === 'resgate' ? '' : '−';
-  const cls = t.type === 'receita' ? 'good' : '';
+  const estorno = t.type === 'despesa' && t.amount < 0;
+  const sign = t.type === 'receita' || estorno ? '+' : t.type === 'guardar' || t.type === 'resgate' ? '' : '−';
+  const cls = t.type === 'receita' || estorno ? 'good' : '';
   return `<button class="rowitem" data-action="edit-tx" data-id="${t.id}">
     <span class="txicon ${t.type}">${icon(TYPES[t.type].icon)}</span>
     <span class="main"><span class="title" style="display:block">${esc(txTitle(t))}</span><span class="meta" style="display:block">${txMeta(t, withDate)}</span></span>
-    <span class="amt ${cls}">${sign}${money(t.amount)}</span>
+    <span class="amt ${cls}">${sign}${money(Math.abs(t.amount))}</span>
   </button>`;
 }
 
@@ -434,6 +444,263 @@ function viewExtrato() {
         : empty('list', q || state.filter !== 'todos' ? 'Nada encontrado com esse filtro.' : 'Nenhum lançamento neste mês.')}
     </section>
   </div>`;
+}
+
+// ---------- Importar ----------
+
+const IMP_ACCEPT = '.ofx,.qfx,.csv,.txt,.xls,.xlsx,text/csv,application/x-ofx';
+const IMP_NOTES = {
+  pagamento_fatura: 'Pagamento de fatura: fica de fora para as compras não contarem duas vezes (elas entram pela fatura do cartão).',
+  transferencia_propria: 'Transferência entre contas da família: não é receita nem despesa.',
+  ignorar: 'Não parece ser uma movimentação.',
+};
+const DOC_TYPES = { extrato_conta: 'extrato', fatura_cartao: 'fatura de cartão', outro: 'documento' };
+
+const shortDate = (iso) => iso.split('-').reverse().slice(0, 2).join('/');
+const daysApart = (a, b) => Math.abs((Date.parse(a) - Date.parse(b)) / 86400000);
+const choiceType = (choice) => choice.split(':')[0];
+
+function fallbackCat() {
+  return store.get('cats', 'cat-outros') ? 'cat-outros' : store.list('cats')[0]?.id || '';
+}
+
+function defaultChoice(l, boxId) {
+  const cat = store.get('cats', l.categoria_id) ? l.categoria_id : fallbackCat();
+  switch (l.classe) {
+    case 'receita': return 'receita';
+    case 'despesa':
+    case 'estorno': return `despesa:${cat}`;
+    case 'guardar': return boxId ? `guardar:${boxId}` : 'ignorar';
+    case 'resgate': return boxId ? `resgate:${boxId}` : 'ignorar';
+    case 'pagamento_divida': return store.get('debts', l.divida_id) ? `divida:${l.divida_id}` : `despesa:${cat}`;
+    default: return 'ignorar';
+  }
+}
+
+// A classificação lembrada ainda vale? (a categoria, caixinha ou dívida pode ter sido excluída)
+function validChoice(choice) {
+  const [type, ref] = choice.split(':');
+  if (type === 'receita' || type === 'ignorar') return true;
+  if (type === 'despesa') return !!store.get('cats', ref);
+  if (type === 'guardar' || type === 'resgate') return !!store.get('boxes', ref);
+  if (type === 'divida') return !!store.get('debts', ref);
+  return false;
+}
+
+// Mesmo tipo, mesmo valor e data até 3 dias de diferença: provavelmente já foi lançado.
+function findDuplicate(item) {
+  const type = choiceType(item.choice);
+  if (type === 'ignorar') return null;
+  return store.list('tx').find((t) => t.type === type && Math.abs(t.amount) === Math.abs(item.amount) && daysApart(t.date, item.date) <= 3) || null;
+}
+
+function choiceOptions(selected) {
+  const opt = (v, label) => `<option value="${v}" ${v === selected ? 'selected' : ''}>${esc(label)}</option>`;
+  const cats = store.list('cats').sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  const boxes = store.list('boxes');
+  const debts = store.list('debts').map((d) => ({ ...d, ...debtBalance(d) })).filter((d) => d.balance > 0 || `divida:${d.id}` === selected);
+  return opt('receita', 'Receita')
+    + `<optgroup label="Despesa">${cats.map((c) => opt(`despesa:${c.id}`, `Despesa: ${c.name}`)).join('')}</optgroup>`
+    + (boxes.length ? `<optgroup label="Guardar">${boxes.map((b) => opt(`guardar:${b.id}`, `Guardar: ${b.name}`)).join('')}</optgroup>` : '')
+    + (boxes.length ? `<optgroup label="Resgate">${boxes.map((b) => opt(`resgate:${b.id}`, `Resgate: ${b.name}`)).join('')}</optgroup>` : '')
+    + (debts.length ? `<optgroup label="Dívida">${debts.map((d) => opt(`divida:${d.id}`, `Pagar dívida: ${d.creditor}`)).join('')}</optgroup>` : '')
+    + opt('ignorar', 'Não lançar');
+}
+
+function impItemRow(i, idx) {
+  const typ = choiceType(i.choice);
+  const estorno = typ === 'despesa' && i.amount < 0;
+  const sign = typ === 'receita' || estorno ? '+' : typ === 'despesa' || typ === 'divida' ? '−' : '';
+  const off = typ === 'ignorar' || !i.include;
+  const note = typ === 'ignorar' ? IMP_NOTES[i.cls] || '' : i.motivo;
+  return `<div class="impitem ${off ? 'off' : ''}">
+    ${typ !== 'ignorar' ? `<input type="checkbox" class="impchk" data-imp-chk="${idx}" ${i.include ? 'checked' : ''} aria-label="Lançar este item">` : '<span class="impchk"></span>'}
+    <div class="main">
+      <div class="top"><span class="title">${esc(i.desc)}${i.parcela ? ` <span class="muted">(${esc(i.parcela)})</span>` : ''}</span><span class="amt num ${sign === '+' ? 'good' : ''}">${sign}${money(Math.abs(i.amount))}</span></div>
+      <div class="meta">${shortDate(i.date)} · ${esc(i.bank)}${estorno ? ' · estorno' : ''}</div>
+      ${i.dup ? `<div class="xs warnline">${icon('alert')}<span>Parece já lançado: ${esc(txTitle(i.dup))}, ${shortDate(i.dup.date)}</span></div>` : ''}
+      ${note ? `<div class="xs muted">${esc(note)}</div>` : ''}
+      <select class="input sm" data-imp-sel="${idx}" aria-label="Lançar como">${choiceOptions(i.choice)}</select>
+    </div>
+  </div>`;
+}
+
+function impFileStatus(f) {
+  if (f.status === 'lendo') return 'Lendo…';
+  if (f.status === 'erro') return esc(f.error);
+  const m = f.meta;
+  return `${esc(m.banco || 'Documento')} · ${DOC_TYPES[m.tipo_documento] || 'documento'}${m.periodo ? ` · ${esc(m.periodo)}` : ''} · ${f.count} lançamento${f.count === 1 ? '' : 's'}`;
+}
+
+function impContext() {
+  return { members: members(), cats: store.list('cats'), debts: activeDebts() };
+}
+
+function viewImportar() {
+  const I = state.imp;
+  const toLaunch = I.items.map((it, idx) => [it, idx]).filter(([it]) => it.choice !== 'ignorar');
+  const skipped = I.items.map((it, idx) => [it, idx]).filter(([it]) => it.choice === 'ignorar');
+  const selected = toLaunch.filter(([it]) => it.include).map(([it]) => it);
+  const totIn = sum(selected.filter((it) => choiceType(it.choice) === 'receita'), (it) => Math.abs(it.amount));
+  const totOut = sum(selected.filter((it) => choiceType(it.choice) === 'despesa'), (it) => it.amount);
+  const who = I.who || me();
+
+  const files = I.files.map((f, i) => `<div class="impfile">
+    <span class="txicon ${f.status === 'pronto' ? 'receita' : ''}">${icon(f.status === 'pronto' ? 'check' : f.status === 'erro' ? 'alert' : 'sync')}</span>
+    <span class="main"><span class="title">${esc(f.name)}</span><span class="meta ${f.status === 'erro' ? 'crit' : ''}">${impFileStatus(f)}</span>
+      ${f.status === 'pronto' && f.meta.observacoes ? `<span class="xs muted">${esc(f.meta.observacoes)}</span>` : ''}</span>
+    ${I.running ? '' : `<button class="iconbtn" data-action="imp-remove" data-idx="${i}" aria-label="Remover">${icon('x')}</button>`}
+  </div>`).join('');
+
+  const local = `<section class="card">
+    <div class="cardhead" style="margin-bottom:4px"><h2>Extrato em OFX, CSV ou planilha</h2><span class="badge good">grátis</span></div>
+    <p class="small muted">O app lê na hora, aqui no aparelho. No internet banking, procure "exportar extrato" em OFX (ou CSV/Excel). Do Asaas, a planilha de extrato.</p>
+    <label class="dropzone ${I.running ? 'disabled' : ''}">${icon('upload')}<span><strong>Escolher arquivos</strong><br><span class="xs muted">Sicoob, Inter, Banco do Brasil, Asaas e outros</span></span>
+      <input type="file" multiple accept="${IMP_ACCEPT}" data-input="imp-files" hidden ${I.running ? 'disabled' : ''}></label>
+  </section>`;
+
+  const viaClaude = `<section class="card">
+    <div class="cardhead" style="margin-bottom:4px"><h2>Fatura em PDF ou print</h2><span class="badge brand">Claude da assinatura</span></div>
+    <ol class="steps">
+      <li><button class="btn sm" data-action="imp-copy">${icon('list')}Copiar instruções</button></li>
+      <li>No app do Claude, anexe o PDF ou o print, cole as instruções e envie. <a href="https://claude.ai/new" target="_blank" rel="noopener">Abrir o Claude</a></li>
+      <li>Copie a resposta inteira do Claude e cole aqui:</li>
+    </ol>
+    ${I.showPrompt ? `<label class="field" style="margin-top:10px"><span>Instruções (selecione tudo e copie)</span><textarea class="input" rows="6" readonly>${esc(imp.claudePrompt(impContext()))}</textarea></label>` : ''}
+    <textarea id="imp-paste" class="input" rows="4" data-input="imp-paste" placeholder="Cole aqui a resposta do Claude (o bloco com o JSON)" style="margin-top:10px">${esc(I.paste || '')}</textarea>
+    <div class="actions" style="margin-top:10px"><button class="btn primary" data-action="imp-read-paste" ${I.paste && I.paste.trim() ? '' : 'disabled'}>Ler resposta</button></div>
+    <p class="xs muted" style="margin-top:10px">Dica: crie um <strong>Projeto</strong> no Claude e cole as instruções nas instruções do projeto. Depois é só anexar a fatura e enviar. Se mudar categorias ou dívidas no app, copie as instruções de novo.</p>
+  </section>`;
+
+  const fileList = files ? `<section class="card tight"><div class="list">${files}</div></section>` : '';
+
+  const review = I.items.length ? `<section class="card tight">
+      <div class="cardhead" style="padding:4px 4px 0"><h2>Revise antes de lançar</h2><span class="small muted">${selected.length} de ${toLaunch.length} marcados</span></div>
+      <div class="imptools">
+        <label class="field"><span>Lançar em nome de</span><select class="input sm" data-imp-who>${members().map((n) => `<option ${n === who ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+        <div class="actions"><button class="btn sm" data-action="imp-all">Marcar todos</button><button class="btn sm" data-action="imp-none">Desmarcar todos</button></div>
+      </div>
+      <div class="list">${toLaunch.map(([it, idx]) => impItemRow(it, idx)).join('') || '<p class="small muted" style="padding:8px 4px">Nenhum item para lançar.</p>'}</div>
+      ${skipped.length ? `<details class="impskip"><summary>Não serão lançados (${skipped.length})</summary><div class="list">${skipped.map(([it, idx]) => impItemRow(it, idx)).join('')}</div></details>` : ''}
+    </section>
+    <div class="impbar">
+      <div class="small"><span class="good num">+${money(totIn)}</span> · <span class="num">−${money(totOut)}</span></div>
+      <div class="actions"><button class="btn" data-action="imp-discard">Descartar</button><button class="btn primary" data-action="imp-commit" ${selected.length && !I.running ? '' : 'disabled'}>Lançar ${selected.length}</button></div>
+    </div>` : '';
+
+  return `${pageHead('Importar', 'Traga extratos e faturas; você revisa antes de lançar.', false)}
+  <div class="stack">
+    ${I.items.length ? `${fileList}${review}${local}${viaClaude}` : `${local}${viaClaude}${fileList}`}
+    ${I.items.length ? '' : tipCard({ titulo: 'Extrato e fatura juntos', texto: 'Importe também a fatura do cartão. O pagamento da fatura que aparece no extrato fica de fora, para as compras não contarem duas vezes. Transferências entre contas de vocês também ficam de fora.' })}
+  </div>`;
+}
+
+// Coloca na tela de revisão os lançamentos de um documento (lido no app ou vindo do Claude).
+function addDoc(f, doc) {
+  const I = state.imp;
+  const boxId = (store.list('boxes').find((b) => b.purpose === 'reserva') || store.list('boxes')[0])?.id;
+  let count = 0;
+  for (const l of doc.lancamentos) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(l.data) || !(l.valor_centavos > 0)) continue;
+    const suggested = defaultChoice(l, boxId);
+    const learned = store.get('rules', imp.ruleKey(l.descricao));
+    const useLearned = learned && validChoice(learned.choice);
+    const item = {
+      key: uid(), fileKey: f.key, hash: f.hash, bank: doc.banco || f.name,
+      date: l.data, desc: l.descricao, amount: l.classe === 'estorno' ? -l.valor_centavos : l.valor_centavos,
+      cls: l.classe, parcela: l.parcela,
+      motivo: useLearned ? 'Classificado como você fez antes' : l.motivo,
+      choice: useLearned ? learned.choice : suggested,
+    };
+    item.suggested = item.choice;
+    item.dup = findDuplicate(item);
+    item.include = item.choice !== 'ignorar' && !item.dup;
+    I.items.push(item);
+    count++;
+  }
+  f.meta = doc;
+  f.count = count;
+  f.status = 'pronto';
+  I.items.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function alreadyImported(f) {
+  const I = state.imp;
+  if (I.files.some((o) => o !== f && o.hash === f.hash && o.status === 'pronto')) throw new Error('Este arquivo já está na lista.');
+  if (store.list('tx').some((t) => t.importHash === f.hash) && !confirm(`"${f.name}" já foi importado antes. Ler de novo?`)) {
+    throw new Error('Já importado antes.');
+  }
+}
+
+async function processFiles(list) {
+  const I = state.imp;
+  const ctx = impContext();
+  const fresh = [...list].map((file) => ({ key: uid(), file, name: file.name, status: 'lendo' }));
+  I.files.push(...fresh);
+  I.running = true;
+  render({ force: true });
+  for (const f of fresh) {
+    try {
+      const { hash, doc } = await imp.readLocalFile(f.file, ctx);
+      f.hash = hash;
+      alreadyImported(f);
+      addDoc(f, doc);
+    } catch (e) {
+      f.status = 'erro';
+      f.error = e.message || String(e);
+    }
+    delete f.file;
+  }
+  I.running = false;
+  render({ force: true });
+}
+
+async function readPaste() {
+  const I = state.imp;
+  const f = { key: uid(), name: 'Resposta do Claude', status: 'lendo' };
+  try {
+    const doc = imp.parseClaudeAnswer(I.paste, impContext());
+    f.hash = await imp.sha256(JSON.stringify(doc.lancamentos));
+    f.name = `Resposta do Claude · ${doc.banco}`;
+    alreadyImported(f);
+    I.files.push(f);
+    addDoc(f, doc);
+    I.paste = '';
+  } catch (e) {
+    toast(e.message || String(e));
+  }
+  render({ force: true });
+}
+
+function commitImport() {
+  const I = state.imp;
+  const who = I.who || me();
+  const recs = I.items.filter((i) => i.include && i.choice !== 'ignorar').map((i) => {
+    const [type, ref] = i.choice.split(':');
+    const rec = {
+      id: uid(), type, amount: type === 'despesa' ? i.amount : Math.abs(i.amount), date: i.date,
+      desc: i.parcela ? `${i.desc} (parcela ${i.parcela})` : i.desc, who, src: 'importacao', importHash: i.hash, bank: i.bank,
+    };
+    if (type === 'despesa') rec.catId = ref;
+    if (type === 'guardar' || type === 'resgate') rec.boxId = ref;
+    if (type === 'divida') rec.debtId = ref;
+    return rec;
+  });
+  if (!recs.length) return toast('Nenhum lançamento marcado.');
+  store.putMany('tx', recs);
+  // Aprende com as correções: da próxima vez, a mesma descrição já vem classificada assim.
+  const rules = new Map();
+  for (const i of I.items) {
+    const key = imp.ruleKey(i.desc);
+    if (key && i.choice !== i.suggested) rules.set(key, { id: key, choice: i.choice });
+  }
+  if (rules.size) store.putMany('rules', [...rules.values()]);
+  const perMonth = {};
+  for (const r of recs) perMonth[monthOf(r.date)] = (perMonth[monthOf(r.date)] || 0) + 1;
+  state.month = Object.entries(perMonth).sort((a, b) => b[1] - a[1])[0][0];
+  state.imp = emptyImp();
+  toast(`${recs.length} lançamento${recs.length === 1 ? '' : 's'} importado${recs.length === 1 ? '' : 's'}.`);
+  location.hash = '#extrato';
 }
 
 // ---------- Orçamento ----------
@@ -1069,10 +1336,14 @@ const FORMS = {
     const f = new FormData(form);
     const type = f.get('type');
     const amount = parseMoney(f.get('amount'));
-    if (!(amount > 0)) return toast('Informe um valor maior que zero.');
+    // Despesa aceita valor negativo: é um estorno, que abate do gasto.
+    const valid = type === 'despesa' ? Number.isFinite(amount) && amount !== 0 : amount > 0;
+    if (!valid) return toast(type === 'despesa' ? 'Informe o valor (negativo se for estorno).' : 'Informe um valor maior que zero.');
     const date = f.get('date');
     if (!date) return toast('Informe a data.');
-    const rec = { id: form.dataset.id || uid(), type, amount, date, desc: String(f.get('desc') || '').trim(), who: f.get('who') };
+    const old = form.dataset.id ? store.get('tx', form.dataset.id) : null;
+    const origin = old && old.src ? { src: old.src, importHash: old.importHash, bank: old.bank } : {};
+    const rec = { ...origin, id: form.dataset.id || uid(), type, amount, date, desc: String(f.get('desc') || '').trim(), who: f.get('who') };
     if (type === 'despesa') rec.catId = f.get('catId');
     if (type === 'guardar' || type === 'resgate') {
       rec.boxId = f.get('boxId');
@@ -1290,6 +1561,41 @@ const ACTIONS = {
     if (t === 'auto') delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = t;
   },
+  async 'imp-copy'() {
+    const text = imp.claudePrompt(impContext());
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Instruções copiadas. Agora abra o Claude e cole.');
+    } catch {
+      state.imp.showPrompt = true; // sem acesso à área de transferência: mostra o texto para copiar à mão
+      render({ force: true });
+    }
+  },
+  'imp-read-paste'() {
+    readPaste();
+  },
+  'imp-remove'(el) {
+    const I = state.imp;
+    const [f] = I.files.splice(Number(el.dataset.idx), 1);
+    if (f) I.items = I.items.filter((i) => i.fileKey !== f.key);
+    render({ force: true });
+  },
+  'imp-all'() {
+    for (const i of state.imp.items) if (i.choice !== 'ignorar') i.include = true;
+    render({ force: true });
+  },
+  'imp-none'() {
+    for (const i of state.imp.items) i.include = false;
+    render({ force: true });
+  },
+  'imp-commit'() {
+    commitImport();
+  },
+  'imp-discard'() {
+    if (!confirm('Descartar esta importação? Nada foi lançado ainda.')) return;
+    state.imp = emptyImp();
+    render({ force: true });
+  },
   async install() {
     if (!installPrompt) return;
     installPrompt.prompt();
@@ -1367,6 +1673,10 @@ document.addEventListener('input', (e) => {
   if (el.dataset.input === 'search') {
     state.search = el.value;
     render({ force: true });
+  } else if (el.dataset.input === 'imp-paste') {
+    state.imp.paste = el.value;
+    const btn = document.querySelector('[data-action="imp-read-paste"]');
+    if (btn) btn.disabled = !el.value.trim();
   } else if (el.dataset.sim) {
     const k = el.dataset.sim;
     state.sim[k] = k === 'initial' || k === 'monthly' ? parseMoney(el.value) || 0 : Number(el.value.replace(',', '.'));
@@ -1377,6 +1687,30 @@ document.addEventListener('input', (e) => {
 
 document.addEventListener('change', (e) => {
   const el = e.target;
+  const I = state.imp;
+  if (el.dataset.input === 'imp-files') {
+    const list = [...(el.files || [])];
+    el.value = '';
+    if (list.length) processFiles(list);
+    return;
+  }
+  if (el.dataset.impSel !== undefined) {
+    const item = I.items[Number(el.dataset.impSel)];
+    item.choice = el.value;
+    item.dup = findDuplicate(item);
+    item.include = item.choice !== 'ignorar';
+    render({ force: true });
+    return;
+  }
+  if (el.dataset.impChk !== undefined) {
+    I.items[Number(el.dataset.impChk)].include = el.checked;
+    render({ force: true });
+    return;
+  }
+  if (el.dataset.impWho !== undefined) {
+    I.who = el.value;
+    return;
+  }
   if (el.dataset.input !== 'import' || !el.files?.[0]) return;
   const reader = new FileReader();
   reader.onload = () => {
