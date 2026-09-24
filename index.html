@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Bolsa Cheia</title>
+  <meta name="description" content="Finanças da família com as lições de O Homem Mais Rico da Babilônia.">
+  <meta name="theme-color" content="#1f4e9a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Bolsa Cheia">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // Aplica o tema antes de desenhar a página, para não piscar.
+    try {
+      const t = (JSON.parse(localStorage.getItem('bolsacheia:meta') || '{}').theme) || 'auto';
+      if (t !== 'auto') document.documentElement.dataset.theme = t;
+    } catch {}
+  </script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div id="app" class="app">
+    <p class="boot">Carregando…</p>
+  </div>
+  <dialog id="sheet" class="sheet" aria-labelledby="sheet-title"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <noscript>O Bolsa Cheia precisa de JavaScript ativado.</noscript>
+</body>
+</html>
