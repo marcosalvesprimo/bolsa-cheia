@@ -1,0 +1,6 @@
+yt-dlp[default]>=2026.10.26
+faster-whisper>=1.2.1
+av>=12,<16
+numpy>=1.26
+opencv-python-headless>=4.9,<5
+chat-downloader>=0.2.8

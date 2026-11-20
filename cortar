@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Comando único: cortar <link-da-live>
+DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
+exec "$DIR/.venv/bin/python" "$DIR/cortar.py" "$@"
