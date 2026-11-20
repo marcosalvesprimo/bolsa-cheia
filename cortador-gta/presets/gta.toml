@@ -1,0 +1,149 @@
+# =====================================================================
+#  Preset "GTA" — critérios de "momento bom" para lives de GTA V / GTA 6
+# =====================================================================
+#  Cada trecho da live recebe uma nota calculada a partir de:
+#    - volume do áudio (gritos, reação)            -> [pesos].volume
+#    - impactos súbitos no som (batida, explosão, tiro) -> [pesos].impacto
+#    - fala mais rápida que o normal do streamer   -> [pesos].velocidade_fala
+#    - palavras-chave ditas na transcrição         -> [categorias.*]
+#    - picos de mensagens no chat (se houver)      -> [pesos].chat
+#  Para criar um preset de outro jogo, copie este arquivo e rode:
+#    cortar <link> --preset meu_jogo.toml
+#
+#  Palavras: sem acento e minúsculas (o script normaliza tudo).
+#  Um "*" no fim casa qualquer final: "polici*" pega policia, policial...
+#  Frases com espaço casam palavras seguidas: "perdi eles".
+
+[geral]
+min_clipes = 5
+max_clipes = 10
+duracao_min = 20          # segundos
+duracao_max = 60          # segundos
+antes_da_acao = 2.5       # o clipe começa este tanto ANTES da ação subir
+depois_da_acao = 2.5      # e termina este tanto depois que ela acalma
+intervalo_minimo = 20     # distância mínima entre dois clipes (s)
+limiar_relativo = 0.40    # clipes extras só entram se tiverem >= 40% da força do melhor
+escala_nota = 4.5         # calibra a nota 0-10 (maior = notas mais baixas)
+
+[transcricao]
+modelo = "small"          # tiny | base | small | medium | large-v3-turbo (melhor, mais lento)
+idioma = "pt"
+dispositivo = "auto"      # auto | cpu | cuda
+feixe = 1                 # beam size; 5 = mais preciso e mais lento
+
+[pesos]
+volume = 1.0
+impacto = 1.2
+velocidade_fala = 0.6
+palavras = 1.0
+chat = 1.0
+chat_atraso = 6.0         # o chat reage ~6 s depois do que acontece na tela
+
+[video]
+# Layout quando há facecam: "empilhado" (facecam em cima, jogo embaixo)
+# Layout sem facecam: "corte" (recorta 9:16 seguindo a ação) ou "desfocado"
+# (jogo inteiro no meio com fundo desfocado)
+facecam = "auto"          # auto | nao | "x,y,l,a" em fração da tela (ex: "0.72,0.70,0.27,0.29")
+altura_facecam = 640      # px da facecam no vídeo final (de 1920)
+layout_sem_facecam = "corte"
+peso_centro = 0.5         # 0 = segue só o movimento; 1 = sempre o centro da tela
+crf = 20                  # qualidade H.264 (menor = melhor/maior)
+preset_x264 = "medium"
+volume_alvo = -14         # LUFS (padrão de Shorts/Reels/TikTok)
+
+[legenda]
+fonte = "Anton"
+tamanho = 140
+altura = 0.62             # posição vertical do centro da legenda (0 = topo, 1 = base)
+cor = "FFFFFF"            # RRGGBB
+cor_destaque = "FFE500"   # palavras-chave e gritos
+contorno = 9
+maiusculas = true
+gancho = true             # texto de gancho no topo nos 3 primeiros segundos
+gancho_tamanho = 78
+
+[chat]
+ativado = true
+palavras = ["kkk*", "kekw", "lul", "omegalul", "lmao", "pog*", "w", "f", "rip", "clip*", "eita", "caralho", "porra", "hah*", "insano"]
+
+# --------------------------------------------------------------------
+#  Categorias (ordem não importa). peso = quanto cada palavra soma.
+# --------------------------------------------------------------------
+[categorias.perseguicao]
+rotulo = "Perseguição / fuga da polícia"
+peso = 2.0
+palavras = [
+  "polici*", "viatura*", "sirene", "giroflex", "camburao", "blitz", "rota",
+  "fuga", "fugir", "foge", "fugindo", "fugi", "persegui*", "procurado*",
+  "estrela*", "helicoptero", "acelera*", "despist*", "perdi eles", "perdi os caras",
+  "na cola", "atras de mim", "vem vindo", "me pegaram", "preso", "prender",
+  "algema*", "encosta", "parado", "mao na cabeca", "bora bora", "corre", "corre corre",
+]
+ganchos = ["A POLÍCIA TÁ NA COLA", "FUGA IMPOSSÍVEL", "ELE NÃO PODIA SER PEGO", "PERSEGUIÇÃO INSANA"]
+titulos = [
+  "A polícia NÃO desistiu dele 🚨 #GTA6",
+  "Fuga impossível no GTA 6 😱🚓",
+  "Ele achou que tinha despistado a polícia… 🚨",
+  "A perseguição mais insana da live 🚓💨",
+]
+
+[categorias.batida]
+rotulo = "Batida / acidente / explosão"
+peso = 2.0
+palavras = [
+  "bati", "batida", "bateu", "batemos", "capot*", "explod*", "explos*", "bomba",
+  "granada", "pegou fogo", "fogo", "voou", "voando", "perda total", "acidente",
+  "atropel*", "tombou", "rpg", "c4", "destrui*", "olha o carro", "acabou o carro",
+]
+ganchos = ["QUE BATIDA FOI ESSA", "O CARRO VOOU", "ISSO NÃO FOI NORMAL", "EXPLODIU TUDO"]
+titulos = [
+  "QUE BATIDA FOI ESSA 💥 #GTA6",
+  "O carro simplesmente VOOU no GTA 6 🚗💨",
+  "Isso não podia ter acontecido 💥😂",
+  "A física do GTA 6 é absurda 💥",
+]
+
+[categorias.tiroteio]
+rotulo = "Briga / tiroteio"
+peso = 1.8
+palavras = [
+  "tiro*", "atira*", "atirou", "bala", "headshot", "arma", "fuzil", "pistola",
+  "sniper", "pipoco", "rajada", "matei", "matou", "morri", "morreu", "me mataram",
+  "derrubei", "abatido", "briga", "soco", "porrada", "luta", "bandido", "assalto",
+  "assalta*", "roubo", "roubar", "mao pra cima", "perdeu",
+]
+ganchos = ["TIROTEIO INSANO", "ISSO VIROU GUERRA", "NINGUÉM ESPERAVA ESSE FINAL", "TROCAÇÃO NO MEIO DA RUA"]
+titulos = [
+  "Tiroteio INSANO no GTA 6 🔫🔥",
+  "Ninguém esperava esse final 😳 #GTA6",
+  "Isso virou guerra em segundos 🔫",
+  "A briga mais aleatória do GTA 6 👊😂",
+]
+
+[categorias.reacao]
+rotulo = "Reação forte do streamer"
+peso = 1.5
+palavras = [
+  "meu deus", "nao acredito", "que isso", "caralho", "porra", "puta que pariu",
+  "pqp", "merda", "cacete", "socorro", "nossa", "mano do ceu", "vai vai vai",
+  "nao nao nao", "nao nao", "uau", "insano", "absurdo", "inacreditavel", "eita",
+  "oxe", "misericordia", "jesus", "olha isso", "viu isso", "foi essa", "aaa*", "ahh*",
+]
+ganchos = ["ELE NÃO ACREDITOU", "OLHA A REAÇÃO DELE", "ESPERA O FINAL", "ISSO FOI DEMAIS"]
+titulos = [
+  "Ele não acreditou no que aconteceu 😱 #GTA6",
+  "A reação dele diz tudo 😳",
+  "Espera o final… 😱🔥",
+  "Momento mais insano da live de GTA 6 🔥",
+]
+
+[categorias.risada]
+rotulo = "Risada / momento engraçado"
+peso = 1.5
+palavras = ["kkk*", "hah*", "hih*", "a a a", "ha ha", "rsrs*", "risos", "risadas", "to rindo", "morri de rir", "que engracado"]
+ganchos = ["ELE NÃO AGUENTOU", "NÃO RI SE FOR CAPAZ", "ISSO FOI MUITO ALEATÓRIO"]
+titulos = [
+  "Ele não aguentou 😂 #GTA6",
+  "O momento mais aleatório do GTA 6 😂",
+  "Tenta não rir 😂🚗",
+]
